@@ -25,23 +25,32 @@ jobs:
           pip install "dbt-snowflake>=1.9.0,<2.0.0"
 
       - name: Write dbt profiles.yml
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
         run: |
           mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << 'EOF'
-banking_dbt:
-  target: prod
-  outputs:
-    prod:
-      type: snowflake
-      account: "${{ secrets.SNOWFLAKE_ACCOUNT }}"
-      user: "${{ secrets.SNOWFLAKE_USER }}"
-      password: "${{ secrets.SNOWFLAKE_PASSWORD }}"
-      role: ACCOUNTADMIN
-      database: BANKING
-      warehouse: "${{ secrets.SNOWFLAKE_WAREHOUSE }}"
-      schema: ANALYTICS
-      threads: 4
-EOF
+          python3 -c "
+          import os
+          content = '\n'.join([
+            'banking_dbt:',
+            '  target: prod',
+            '  outputs:',
+            '    prod:',
+            '      type: snowflake',
+            '      account: \"' + os.environ['SNOWFLAKE_ACCOUNT'] + '\"',
+            '      user: \"' + os.environ['SNOWFLAKE_USER'] + '\"',
+            '      password: \"' + os.environ['SNOWFLAKE_PASSWORD'] + '\"',
+            '      role: ACCOUNTADMIN',
+            '      database: BANKING',
+            '      warehouse: \"' + os.environ['SNOWFLAKE_WAREHOUSE'] + '\"',
+            '      schema: ANALYTICS',
+            '      threads: 4',
+          ])
+          open(os.path.expanduser('~/.dbt/profiles.yml'), 'w').write(content)
+          "
 
       - name: dbt deps
         working-directory: banking_dbt
