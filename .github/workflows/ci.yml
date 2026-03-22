@@ -70,31 +70,36 @@ jobs:
           pip install "dbt-snowflake>=1.9.0,<2.0.0"
 
       - name: Write dbt profiles.yml
-        run: |
-          mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << 'EOF'
-banking_dbt:
-  target: prod
-  outputs:
-    prod:
-      type: snowflake
-      account: "${{ secrets.SNOWFLAKE_ACCOUNT }}"
-      user: "${{ secrets.SNOWFLAKE_USER }}"
-      password: "${{ secrets.SNOWFLAKE_PASSWORD }}"
-      role: ACCOUNTADMIN
-      database: BANKING
-      warehouse: "${{ secrets.SNOWFLAKE_WAREHOUSE }}"
-      schema: ANALYTICS
-      threads: 1
-EOF
-
-      - name: dbt deps + compile
-        working-directory: banking_dbt
-        run: |
-          dbt deps
-          dbt compile
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << EOF
+          banking_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: snowflake
+                account: "${SNOWFLAKE_ACCOUNT}"
+                user: "${SNOWFLAKE_USER}"
+                password: "${SNOWFLAKE_PASSWORD}"
+                role: ACCOUNTADMIN
+                database: BANKING
+                warehouse: "${SNOWFLAKE_WAREHOUSE}"
+                schema: ANALYTICS
+                threads: 1
+          EOF
+
+      - name: dbt deps + compile
+        working-directory: banking_dbt
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: |
+          dbt deps
+          dbt compile
