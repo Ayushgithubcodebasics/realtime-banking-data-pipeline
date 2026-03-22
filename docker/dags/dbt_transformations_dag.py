@@ -35,7 +35,6 @@ with DAG(
     tags=["dbt", "silver", "gold", "scd2"],
 ) as dag:
 
-    # Step 1: Staging views FIRST — snapshots depend on these
     task_staging = BashOperator(
         task_id="dbt_run_staging",
         bash_command=(
@@ -46,7 +45,6 @@ with DAG(
         ),
     )
 
-    # Step 2: SCD2 snapshots — references stg_customers & stg_accounts
     task_snapshot = BashOperator(
         task_id="dbt_snapshot",
         bash_command=(
@@ -56,7 +54,6 @@ with DAG(
         ),
     )
 
-    # Step 3: Dimension & fact tables
     task_marts = BashOperator(
         task_id="dbt_run_marts",
         bash_command=(
@@ -67,7 +64,6 @@ with DAG(
         ),
     )
 
-    # Step 4: Data quality tests
     task_test = BashOperator(
         task_id="dbt_test",
         bash_command=(
@@ -77,6 +73,4 @@ with DAG(
         ),
     )
 
-    # ── Correct order: staging → snapshot → marts → test ─────
     task_staging >> task_snapshot >> task_marts >> task_test
-    
