@@ -1,0 +1,89 @@
+name: CD — Deploy dbt to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-dbt:
+    name: dbt Run + Test (Production Snowflake)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dbt-snowflake
+        run: |
+          python -m pip install --upgrade pip
+          pip install "dbt-snowflake>=1.9.0,<2.0.0"
+
+      - name: Write dbt profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+banking_dbt:
+  target: prod
+  outputs:
+    prod:
+      type: snowflake
+      account: "${{ secrets.SNOWFLAKE_ACCOUNT }}"
+      user: "${{ secrets.SNOWFLAKE_USER }}"
+      password: "${{ secrets.SNOWFLAKE_PASSWORD }}"
+      role: ACCOUNTADMIN
+      database: BANKING
+      warehouse: "${{ secrets.SNOWFLAKE_WAREHOUSE }}"
+      schema: ANALYTICS
+      threads: 4
+EOF
+
+      - name: dbt deps
+        working-directory: banking_dbt
+        run: dbt deps
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+      - name: dbt run staging (Silver layer)
+        working-directory: banking_dbt
+        run: dbt run --select staging
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+      - name: dbt snapshot (SCD2)
+        working-directory: banking_dbt
+        run: dbt snapshot
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+      - name: dbt run marts (Gold layer)
+        working-directory: banking_dbt
+        run: dbt run --select marts
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+      - name: dbt test (data quality)
+        working-directory: banking_dbt
+        run: dbt test
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}

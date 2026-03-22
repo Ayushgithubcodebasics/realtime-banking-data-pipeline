@@ -1,0 +1,28 @@
+# ── Data Generator ──────────────────────────────────────────────
+psycopg2-binary>=2.9.9
+Faker>=28.0.0
+
+# ── Kafka Consumer ───────────────────────────────────────────────
+# kafka-python-ng is the maintained fork of the abandoned kafka-python
+kafka-python-ng>=2.2.3
+
+# ── MinIO / S3 ───────────────────────────────────────────────────
+boto3>=1.35.0
+
+# ── Parquet (pyarrow replaces broken fastparquet) ────────────────
+pyarrow>=17.0.0
+pandas>=2.2.0
+
+# ── Debezium connector registration ─────────────────────────────
+requests>=2.32.0
+
+# ── dbt ─────────────────────────────────────────────────────────
+dbt-core>=1.9.0,<2.0.0
+dbt-snowflake>=1.9.0,<2.0.0
+
+# ── Utilities ────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Code quality (CI) ────────────────────────────────────────────
+ruff>=0.6.0
+pytest>=8.0.0

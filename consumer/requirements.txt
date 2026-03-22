@@ -1,0 +1,5 @@
+kafka-python-ng>=2.2.3
+boto3>=1.35.0
+pyarrow>=17.0.0
+pandas>=2.2.0
+python-dotenv>=1.0.0

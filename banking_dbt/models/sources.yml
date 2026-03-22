@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Bronze layer — raw CDC events loaded from MinIO by Airflow"
+    database: BANKING
+    schema: RAW
+    tables:
+      - name: customers
+        description: "Raw customer records from PostgreSQL CDC"
+        columns:
+          - name: id
+            description: "Source system primary key"
+            tests:
+              - not_null
+          - name: email
+            description: "Customer email address"
+            tests:
+              - not_null
+
+      - name: accounts
+        description: "Raw account records from PostgreSQL CDC"
+        columns:
+          - name: id
+            tests:
+              - not_null
+          - name: customer_id
+            tests:
+              - not_null
+
+      - name: transactions
+        description: "Raw transaction records from PostgreSQL CDC"
+        columns:
+          - name: id
+            tests:
+              - not_null
+          - name: account_id
+            tests:
+              - not_null
+          - name: txn_type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ["DEPOSIT", "WITHDRAWAL", "TRANSFER"]
+          - name: amount
+            tests:
+              - not_null

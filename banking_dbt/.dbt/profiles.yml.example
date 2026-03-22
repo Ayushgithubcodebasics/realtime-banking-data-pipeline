@@ -1,0 +1,15 @@
+banking_dbt:
+  target: prod
+  outputs:
+    prod:
+      type: snowflake
+      account: "YOUR_ACCOUNT_IDENTIFIER"   # e.g. abc12345-myorg
+      user: "YOUR_USERNAME"
+      password: "YOUR_PASSWORD"
+      role: ACCOUNTADMIN
+      database: BANKING
+      warehouse: COMPUTE_WH
+      schema: ANALYTICS
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: banking_dbt_prod

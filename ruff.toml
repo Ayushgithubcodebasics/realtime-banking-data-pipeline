@@ -1,0 +1,16 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "F401",   # unused imports — sometimes intentional
+]
+exclude = [
+    "banking_dbt/target/",
+    "banking_dbt/dbt_packages/",
+    ".venv/",
+    "venv/",
+]

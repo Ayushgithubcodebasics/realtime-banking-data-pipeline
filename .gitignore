@@ -1,0 +1,58 @@
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.env.local
+
+# ── Environment secrets (NEVER commit these) ────────────────────
+.env
+.env.*
+!.env.example
+
+# ── dbt ─────────────────────────────────────────────────────────
+banking_dbt/target/
+banking_dbt/dbt_packages/
+banking_dbt/logs/
+banking_dbt/.dbt/profiles.yml
+banking_dbt/.dbt/.user.yml
+
+# ── Docker volumes (generated data) ─────────────────────────────
+docker/logs/*
+!docker/logs/.gitkeep
+docker/plugins/*
+!docker/plugins/.gitkeep
+docker/postgres/
+docker/minio/
+
+# ── Airflow ──────────────────────────────────────────────────────
+airflow.cfg
+airflow.db
+standalone_admin_password.txt
+
+# ── Parquet / data files ─────────────────────────────────────────
+*.parquet
+*.csv
+*.json.gz
+
+# ── IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── GitHub Actions / CI CD ───────────────────────────────────────
+.github/cache/
+.cache/
+*.log
