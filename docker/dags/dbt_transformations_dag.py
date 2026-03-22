@@ -74,4 +74,3 @@ with DAG(
     )
 
     task_staging >> task_snapshot >> task_marts >> task_test
-    
