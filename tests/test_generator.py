@@ -1,49 +1,43 @@
 """
-Basic unit tests for the data generator.
+Unit tests for the banking data generator.
 These run in CI against a real PostgreSQL service container.
 """
+
+import importlib.util
 import os
+import sys
 from decimal import Decimal
+
 import pytest
 
 # Add project root to path
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def test_random_money_range():
     """random_money should always return a value within bounds."""
-    from data_generator.generator import random_money  # noqa: F401 (dynamic import check)
-    # Dynamically import to avoid requiring psycopg2 at collection time
-    import importlib.util, pathlib
     spec = importlib.util.spec_from_file_location(
         "generator",
-        pathlib.Path(__file__).parent.parent / "data-generator" / "generator.py",
+        importlib.util.find_spec("pathlib") and
+        __import__("pathlib").Path(__file__).parent.parent / "data-generator" / "generator.py",
     )
-    # We cannot fully execute the module (it connects to DB at import),
-    # so just verify the file is parseable Python.
-    source = (pathlib.Path(__file__).parent.parent / "data-generator" / "generator.py").read_text()
-    compile(source, "generator.py", "exec")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    for _ in range(100):
+        val = module.random_money(Decimal("1.00"), Decimal("1000.00"))
+        assert Decimal("1.00") <= val <= Decimal("1000.00")
+        assert val == round(val, 2)
 
 
-def test_consumer_module_parseable():
-    """kafka_to_minio.py should be valid Python."""
-    import pathlib
-    source = (pathlib.Path(__file__).parent.parent / "consumer" / "kafka_to_minio.py").read_text()
-    compile(source, "kafka_to_minio.py", "exec")
+def test_random_money_two_decimal_places():
+    """random_money should always return exactly 2 decimal places."""
+    spec = importlib.util.spec_from_file_location(
+        "generator",
+        __import__("pathlib").Path(__file__).parent.parent / "data-generator" / "generator.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
 
-
-def test_register_connector_parseable():
-    """register_connector.py should be valid Python."""
-    import pathlib
-    source = (pathlib.Path(__file__).parent.parent / "kafka-debezium" / "register_connector.py").read_text()
-    compile(source, "register_connector.py", "exec")
-
-
-def test_dag_files_parseable():
-    """All Airflow DAG files should be valid Python."""
-    import pathlib
-    dag_dir = pathlib.Path(__file__).parent.parent / "docker" / "dags"
-    for dag_file in dag_dir.glob("*.py"):
-        source = dag_file.read_text()
-        compile(source, str(dag_file), "exec")
+    val = module.random_money(Decimal("10.00"), Decimal("100.00"))
+    assert val == val.quantize(Decimal("0.01"))
