@@ -50,3 +50,4 @@ def test_random_money_two_decimal_places():
 
     val = module.random_money(Decimal("10.00"), Decimal("100.00"))
     assert val == val.quantize(Decimal("0.01"))
+    
