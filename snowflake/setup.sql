@@ -17,15 +17,17 @@ CREATE WAREHOUSE IF NOT EXISTS COMPUTE_WH
     INITIALLY_SUSPENDED = TRUE;
 
 -- ── 2. Schemas ────────────────────────────────────────────────
--- RAW    = Bronze layer  (loaded by Airflow from MinIO parquet)
+-- RAW       = Bronze layer  (loaded by Airflow from MinIO parquet)
 -- ANALYTICS = Silver/Gold layer (built by dbt)
 CREATE SCHEMA IF NOT EXISTS BANKING.RAW;
 CREATE SCHEMA IF NOT EXISTS BANKING.ANALYTICS;
 
 -- ── 3. RAW Tables (Bronze Layer) ─────────────────────────────
 -- These receive raw CDC events from MinIO via Airflow.
--- Column names MUST match the Postgres column names exactly
+-- Column names MUST match the Postgres/consumer column names exactly
 -- so MATCH_BY_COLUMN_NAME works in COPY INTO.
+-- _cdc_op: Debezium operation type (r=read, c=create, u=update, d=delete)
+-- _cdc_ts:  Debezium event timestamp in milliseconds (epoch)
 
 USE SCHEMA BANKING.RAW;
 
@@ -35,6 +37,8 @@ CREATE TABLE IF NOT EXISTS customers (
     last_name   VARCHAR,
     email       VARCHAR,
     created_at  TIMESTAMP_TZ,
+    _cdc_op     VARCHAR,
+    _cdc_ts     BIGINT,
     _loaded_at  TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
 );
 
@@ -45,6 +49,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     balance         FLOAT,
     currency        VARCHAR,
     created_at      TIMESTAMP_TZ,
+    _cdc_op         VARCHAR,
+    _cdc_ts         BIGINT,
     _loaded_at      TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
 );
 
@@ -56,6 +62,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     related_account_id  INTEGER,
     status              VARCHAR,
     created_at          TIMESTAMP_TZ,
+    _cdc_op             VARCHAR,
+    _cdc_ts             BIGINT,
     _loaded_at          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
 );
 

@@ -1,7 +1,8 @@
 """
 Airflow DAG: MinIO → Snowflake Bronze Load
-Runs every minute. Downloads Parquet files from MinIO and loads them
+Runs every 5 minutes. Downloads Parquet files from MinIO and loads them
 into the RAW (Bronze) tables in Snowflake using PUT + COPY INTO.
+After a successful load it automatically triggers the dbt_transformations DAG.
 
 Key fixes over the original:
   - All env vars read from os.environ (set via docker-compose environment:)
@@ -12,6 +13,7 @@ Key fixes over the original:
   - schedule is used instead of deprecated schedule_interval
   - provide_context=True removed (deprecated in Airflow 2.x)
   - Proper XCom return from download task
+  - Triggers dbt_transformations DAG after every successful bronze load
 """
 
 import io
@@ -24,6 +26,7 @@ import pyarrow.parquet as pq
 import snowflake.connector
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 # ── Config from env (injected via docker-compose environment:) ─
 MINIO_ENDPOINT   = os.environ["MINIO_ENDPOINT"]
@@ -68,7 +71,7 @@ def get_s3_client():
 def list_new_files(**context) -> dict[str, list[str]]:
     """
     Lists all parquet files in MinIO for each table.
-    Tracks already-processed keys via Airflow XCom / Variable.
+    Tracks already-processed keys via Airflow Variable.
     Returns dict of {table: [s3_key, ...]} for unprocessed files.
     """
     from airflow.models import Variable
@@ -77,7 +80,6 @@ def list_new_files(**context) -> dict[str, list[str]]:
     new_files: dict[str, list[str]] = {}
 
     for table in TABLES:
-        # Load set of already-processed keys from Airflow Variable
         var_key = f"processed_keys_{table}"
         try:
             processed = set(Variable.get(var_key, deserialize_json=True))
@@ -93,7 +95,7 @@ def list_new_files(**context) -> dict[str, list[str]]:
                 if key.endswith(".parquet") and key not in processed:
                     all_keys.append(key)
 
-        new_files[table] = sorted(all_keys)  # process oldest first
+        new_files[table] = sorted(all_keys)
         print(f"  [{table}] {len(all_keys)} new file(s) to load")
 
     return new_files
@@ -129,17 +131,14 @@ def load_to_snowflake(**context) -> None:
             loaded_keys = []
 
             for s3_key in keys:
-                # Download Parquet from MinIO into memory
                 buf = io.BytesIO()
                 s3.download_fileobj(BUCKET, s3_key, buf)
                 buf.seek(0)
 
-                # Validate it's readable before uploading to Snowflake
                 arrow_table = pq.read_table(buf)
                 row_count = len(arrow_table)
                 buf.seek(0)
 
-                # Write to a named temp file (Snowflake PUT needs a real path)
                 with tempfile.NamedTemporaryFile(
                     suffix=".parquet", delete=False
                 ) as tmp:
@@ -147,16 +146,12 @@ def load_to_snowflake(**context) -> None:
                     tmp_path = tmp.name
 
                 try:
-                    # PUT uploads to Snowflake internal table stage
                     put_sql = (
                         f"PUT 'file://{tmp_path}' @%{table} "
                         f"AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
                     )
                     cur.execute(put_sql)
 
-                    # COPY INTO with MATCH_BY_COLUMN_NAME is crucial:
-                    # parquet column names → Snowflake column names (case-insensitive)
-                    # ON_ERROR=CONTINUE means bad rows are skipped not abort the load
                     copy_sql = f"""
                         COPY INTO {table}
                         FROM @%{table}
@@ -180,7 +175,6 @@ def load_to_snowflake(**context) -> None:
                 finally:
                     os.unlink(tmp_path)
 
-            # Persist loaded keys so we don't reload them next run
             var_key = f"processed_keys_{table}"
             try:
                 existing = set(Variable.get(var_key, deserialize_json=True))
@@ -209,7 +203,7 @@ with DAG(
     dag_id="minio_to_snowflake_bronze",
     default_args=default_args,
     description="Load new MinIO parquet files into Snowflake RAW (Bronze) tables",
-    schedule=None,   # 'schedule' replaces deprecated 'schedule_interval'
+    schedule="*/5 * * * *",   # every 5 minutes
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["bronze", "minio", "snowflake"],
@@ -225,4 +219,13 @@ with DAG(
         python_callable=load_to_snowflake,
     )
 
-    task_list >> task_load
+    # Automatically kick off dbt after every bronze load
+    task_trigger_dbt = TriggerDagRunOperator(
+        task_id="trigger_dbt_transformations",
+        trigger_dag_id="dbt_transformations",
+        wait_for_completion=False,   # fire-and-forget; dbt runs in parallel
+        reset_dag_run=True,
+    )
+
+    task_list >> task_load >> task_trigger_dbt
+    

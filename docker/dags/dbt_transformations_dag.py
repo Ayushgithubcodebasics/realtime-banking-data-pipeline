@@ -1,12 +1,13 @@
 """
 Airflow DAG: dbt Transformations (Silver + Gold layers)
-Runs hourly AFTER the bronze load has completed.
+Triggered automatically by minio_to_snowflake_bronze after every bronze load.
+Can also be triggered manually from the Airflow UI when needed.
 
-Pipeline:
+Pipeline order (must be exactly this sequence):
   1. dbt run staging  → create stg_customers, stg_accounts, stg_transactions views
-  2. dbt snapshot     → SCD2 tables (snapshots reference staging views so must run after)
+  2. dbt snapshot     → SCD2 tables (snapshots SELECT from staging, so staging must exist first)
   3. dbt run marts    → dim_customers, dim_accounts, fact_transactions
-  4. dbt test         → validate data quality
+  4. dbt test         → validate data quality across all layers
 """
 
 from datetime import datetime, timedelta
@@ -29,7 +30,7 @@ with DAG(
     dag_id="dbt_transformations",
     default_args=default_args,
     description="dbt SCD2 snapshots + staging + marts (Silver & Gold layers)",
-    schedule="@hourly",
+    schedule=None,          # triggered by minio_to_snowflake_bronze DAG
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["dbt", "silver", "gold", "scd2"],
@@ -74,3 +75,4 @@ with DAG(
     )
 
     task_staging >> task_snapshot >> task_marts >> task_test
+    
