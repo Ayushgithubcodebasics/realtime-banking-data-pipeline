@@ -228,4 +228,3 @@ with DAG(
     )
 
     task_list >> task_load >> task_trigger_dbt
-    

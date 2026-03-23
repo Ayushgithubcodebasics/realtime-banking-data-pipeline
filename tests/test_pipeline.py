@@ -179,4 +179,3 @@ def test_cdc_metadata_attached_to_record():
     assert record["_cdc_op"] == "u"
     assert record["_cdc_ts"] == 1700003000000
     assert record["email"] == "new@example.com"
-    
