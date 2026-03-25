@@ -2,19 +2,12 @@
 
 {{
     config(
-        target_schema = 'ANALYTICS',
-        unique_key    = 'account_id',
-        strategy      = 'check',
-        check_cols    = ['account_type', 'balance', 'currency'],
-        invalidate_hard_deletes = false
+        target_schema='ANALYTICS',
+        unique_key='account_id',
+        strategy='timestamp',
+        updated_at='record_updated_at'
     )
 }}
-
-/*
-  SCD Type 2 snapshot for accounts.
-  Tracks changes to account_type, balance, and currency over time.
-  Particularly useful for auditing balance changes.
-*/
 
 SELECT * FROM {{ ref('stg_accounts') }}
 

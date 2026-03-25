@@ -1,4 +1,4 @@
-name: CD — Deploy dbt to Production
+name: CD - dbt Deploy
 
 on:
   push:
@@ -6,93 +6,93 @@ on:
 
 jobs:
   deploy-dbt:
-    name: dbt Run + Test (Production Snowflake)
+    name: dbt run and test in Snowflake
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check required Snowflake secrets
+        id: check_secrets
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: |
+          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ] || [ -z "$SNOWFLAKE_WAREHOUSE" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Snowflake secrets are missing. Skipping CD job steps."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
+        if: steps.check_secrets.outputs.ready == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Python 3.11
+        if: steps.check_secrets.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
       - name: Install dbt-snowflake
+        if: steps.check_secrets.outputs.ready == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install "dbt-snowflake>=1.9.0,<2.0.0"
 
-      - name: Write dbt profiles.yml
+      - name: Write dbt profile
+        if: steps.check_secrets.outputs.ready == 'true'
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
         run: |
           mkdir -p ~/.dbt
-          python3 -c "
-          import os
-          content = '\n'.join([
-            'banking_dbt:',
-            '  target: prod',
-            '  outputs:',
-            '    prod:',
-            '      type: snowflake',
-            '      account: \"' + os.environ['SNOWFLAKE_ACCOUNT'] + '\"',
-            '      user: \"' + os.environ['SNOWFLAKE_USER'] + '\"',
-            '      password: \"' + os.environ['SNOWFLAKE_PASSWORD'] + '\"',
-            '      role: ACCOUNTADMIN',
-            '      database: BANKING',
-            '      warehouse: \"' + os.environ['SNOWFLAKE_WAREHOUSE'] + '\"',
-            '      schema: ANALYTICS',
-            '      threads: 4',
-          ])
-          open(os.path.expanduser('~/.dbt/profiles.yml'), 'w').write(content)
-          "
+          cat > ~/.dbt/profiles.yml << EOF
+          banking_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: snowflake
+                account: "${SNOWFLAKE_ACCOUNT}"
+                user: "${SNOWFLAKE_USER}"
+                password: "${SNOWFLAKE_PASSWORD}"
+                role: "${SNOWFLAKE_ROLE:-TRANSFORMER}"
+                database: "BANKING"
+                warehouse: "${SNOWFLAKE_WAREHOUSE}"
+                schema: "ANALYTICS"
+                threads: 4
+          EOF
 
       - name: dbt deps
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt deps
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt run staging (Silver layer)
+      - name: dbt run staging
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt run --select staging
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt snapshot (SCD2)
+      - name: dbt snapshot
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt snapshot
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt run marts (Gold layer)
+      - name: dbt run marts
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt run --select marts
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt test (data quality)
+      - name: dbt test
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt test
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+      - name: CD skipped
+        if: steps.check_secrets.outputs.ready != 'true'
+        run: echo "CD skipped because required Snowflake secrets are not configured."

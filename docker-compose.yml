@@ -1,8 +1,6 @@
 # ============================================================
 # Banking Modern Data Stack - Docker Compose
-# Updated: 2026 - Fully working with healthchecks & init
-# Services: Zookeeper, Kafka, Debezium Connect, PostgreSQL,
-#           MinIO, Airflow (webserver + scheduler + init)
+# Includes optional app services for generator and Kafka consumer.
 # ============================================================
 
 x-airflow-common: &airflow-common
@@ -10,24 +8,18 @@ x-airflow-common: &airflow-common
     context: .
     dockerfile: dockerfile-airflow.dockerfile
   restart: unless-stopped
-  dns:
-    - 127.0.0.11
-    - 8.8.8.8
   depends_on:
     airflow-postgres:
       condition: service_healthy
     minio:
       condition: service_healthy
   environment:
-    # Core Airflow settings
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__FERNET_KEY: ""
-    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
-    # DB connection
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
-    # Pass Snowflake & MinIO creds into Airflow containers so DAGs can read them
     SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
     SNOWFLAKE_USER: ${SNOWFLAKE_USER}
     SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
@@ -49,7 +41,6 @@ x-airflow-common: &airflow-common
     - banking-mds-net
 
 services:
-  # ── Zookeeper ──────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.7.1
     container_name: zookeeper
@@ -71,7 +62,6 @@ services:
     networks:
       - banking-mds-net
 
-  # ── Kafka ─────────────────────────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.7.1
     container_name: kafka
@@ -97,13 +87,7 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-broker-api-versions",
-          "--bootstrap-server",
-          "localhost:9092",
-        ]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -111,7 +95,6 @@ services:
     networks:
       - banking-mds-net
 
-  # ── Debezium Kafka Connect ─────────────────────────────────
   connect:
     image: debezium/connect:2.6.1.Final
     container_name: debezium-connect
@@ -135,13 +118,7 @@ services:
       VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
       CONNECT_REST_ADVERTISED_HOST_NAME: connect
     healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "http://localhost:8083/connectors",
-        ]
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
       interval: 15s
       timeout: 10s
       retries: 15
@@ -149,7 +126,6 @@ services:
     networks:
       - banking-mds-net
 
-  # ── PostgreSQL (Banking OLTP) ──────────────────────────────
   postgres:
     image: postgres:16
     container_name: banking-postgres
@@ -177,7 +153,6 @@ services:
     networks:
       - banking-mds-net
 
-  # ── MinIO (S3-compatible landing zone) ────────────────────
   minio:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     container_name: minio
@@ -199,7 +174,51 @@ services:
     networks:
       - banking-mds-net
 
-  # ── Airflow - metadata PostgreSQL ─────────────────────────
+  generator:
+    build:
+      context: .
+      dockerfile: dockerfile-app.dockerfile
+    container_name: banking-generator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python data-generator/generator.py
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      GENERATOR_SLEEP_SECONDS: ${GENERATOR_SLEEP_SECONDS:-5}
+    networks:
+      - banking-mds-net
+    profiles: ["apps"]
+
+  consumer:
+    build:
+      context: .
+      dockerfile: dockerfile-app.dockerfile
+    container_name: kafka-to-minio-consumer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: python consumer/kafka_to_minio.py
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      CONSUMER_BATCH_SIZE: ${CONSUMER_BATCH_SIZE:-50}
+      CONSUMER_FLUSH_INTERVAL_SECONDS: ${CONSUMER_FLUSH_INTERVAL_SECONDS:-20}
+    networks:
+      - banking-mds-net
+    profiles: ["apps"]
+
   airflow-postgres:
     image: postgres:16
     container_name: airflow-postgres
@@ -213,28 +232,25 @@ services:
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${AIRFLOW_DB_USER} -d ${AIRFLOW_DB_NAME}",
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_DB_USER} -d ${AIRFLOW_DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
       - banking-mds-net
 
-  # ── Airflow Init (runs once, migrates DB & creates admin) ──
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
     restart: "no"
-    command: bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@banking.local && echo OK"
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD}
+      --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} && echo OK"
     depends_on:
       airflow-postgres:
         condition: service_healthy
 
-  # ── Airflow Webserver ──────────────────────────────────────
   airflow-webserver:
     <<: *airflow-common
     container_name: airflow-webserver
@@ -253,7 +269,6 @@ services:
       retries: 5
       start_period: 60s
 
-  # ── Airflow Scheduler ──────────────────────────────────────
   airflow-scheduler:
     <<: *airflow-common
     container_name: airflow-scheduler
