@@ -1,169 +1,244 @@
-"""
-Kafka → MinIO Consumer
-Consumes CDC events from the three banking Kafka topics and writes them
-to MinIO as Parquet files, partitioned by date.
+"""Kafka -> MinIO CDC consumer.
 
-Key fixes over the original:
-  - Uses kafka-python-ng (maintained fork; kafka-python is abandoned)
-  - Uses pyarrow instead of broken fastparquet for Parquet serialisation
-  - Handles all CDC operation types: r (read/snapshot), c (create),
-    u (update), d (delete)
-  - Writes to a temp file via BytesIO → avoids disk clutter
-  - Correctly handles Debezium's nested payload → after structure
-  - Uses pandas nullable dtypes so NaN integers (related_account_id)
-    don't crash pyarrow
-
-Usage:
-    pip install -r requirements.txt
-    python kafka_to_minio.py
+Consumes Debezium events and writes table-specific Parquet batches to MinIO.
+Improvements over the original version:
+  - no side effects at import time
+  - manual Kafka commits after successful upload
+  - DLQ support for malformed events
+  - flush by batch size or time window
+  - consistent metadata columns for downstream modeling
 """
+
+from __future__ import annotations
 
 import io
+import json
 import os
+import time
+from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import Any
 
 import boto3
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from dotenv import load_dotenv
+from botocore.exceptions import BotoCoreError, ClientError
 from kafka import KafkaConsumer
+from kafka.structs import OffsetAndMetadata, TopicPartition
 
-load_dotenv(Path(__file__).parent / ".env")
+from common.config import env_int, load_project_env
 
-# ── Kafka topics ──────────────────────────────────────────────
+load_project_env()
+
 TOPICS = [
     "banking_server.public.customers",
     "banking_server.public.accounts",
     "banking_server.public.transactions",
 ]
-
-# ── Kafka consumer ────────────────────────────────────────────
-consumer = KafkaConsumer(
-    *TOPICS,
-    bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP", "localhost:29092").split(","),
-    auto_offset_reset="earliest",
-    enable_auto_commit=True,
-    group_id=os.getenv("KAFKA_GROUP", "minio-consumer-group"),
-    value_deserializer=lambda x: __import__("json").loads(x.decode("utf-8")),
-    consumer_timeout_ms=-1,   # block forever (use Ctrl-C to stop)
-    session_timeout_ms=30_000,
-    heartbeat_interval_ms=10_000,
-    max_poll_records=500,
-)
-
-# ── MinIO / S3 client ─────────────────────────────────────────
-s3 = boto3.client(
-    "s3",
-    endpoint_url=os.getenv("MINIO_ENDPOINT", "http://localhost:9000"),
-    aws_access_key_id=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
-    aws_secret_access_key=os.getenv("MINIO_SECRET_KEY", "minioadmin123"),
-)
-
+BATCH_SIZE = env_int("CONSUMER_BATCH_SIZE", 50)
+FLUSH_INTERVAL_SECONDS = env_int("CONSUMER_FLUSH_INTERVAL_SECONDS", 20)
+UPLOAD_RETRIES = env_int("CONSUMER_UPLOAD_RETRIES", 3)
 BUCKET = os.getenv("MINIO_BUCKET", "raw")
-
-# Create bucket if it doesn't exist
-existing_buckets = [b["Name"] for b in s3.list_buckets().get("Buckets", [])]
-if BUCKET not in existing_buckets:
-    s3.create_bucket(Bucket=BUCKET)
-    print(f"✅ Created MinIO bucket: {BUCKET}")
-else:
-    print(f"✅ MinIO bucket exists: {BUCKET}")
-
-# ── In-memory buffer (topic → list of records) ────────────────
-BATCH_SIZE = 50   # flush to MinIO every N records per topic
-buffer: dict[str, list[dict]] = {t: [] for t in TOPICS}
+DLQ_PREFIX = os.getenv("MINIO_DLQ_PREFIX", "dlq")
 
 
 def extract_table_name(topic: str) -> str:
-    """banking_server.public.customers → customers"""
     return topic.split(".")[-1]
 
 
-def write_to_minio(table_name: str, records: list[dict]) -> None:
-    """Convert records to Parquet and upload to MinIO."""
-    if not records:
-        return
-
-    df = pd.DataFrame(records)
-
-    # Use pandas nullable integer types so NaN integers survive Parquet round-trip
-    for col in df.select_dtypes(include=["float64"]).columns:
-        # Only convert columns that look like IDs (whole numbers only)
-        if df[col].dropna().apply(lambda x: x == int(x)).all():
-            df[col] = pd.array(
-                df[col].where(df[col].notna(), None), dtype=pd.Int64Dtype()
-            )
-
-    # Convert to Parquet in memory (no temp files on disk)
-    arrow_table = pa.Table.from_pandas(df, preserve_index=False)
-    buf = io.BytesIO()
-    pq.write_table(arrow_table, buf)
-    buf.seek(0)
-
-    # S3 key: table/date=YYYY-MM-DD/HHMMSS_ffffff.parquet
-    now = datetime.now(tz=timezone.utc)
-    date_str = now.strftime("%Y-%m-%d")
-    ts_str = now.strftime("%H%M%S_%f")
-    s3_key = f"{table_name}/date={date_str}/{table_name}_{ts_str}.parquet"
-
-    s3.upload_fileobj(buf, BUCKET, s3_key)
-    print(
-        f"  📦 Uploaded {len(records):>4} records → "
-        f"s3://{BUCKET}/{s3_key}"
+def create_consumer() -> KafkaConsumer:
+    return KafkaConsumer(
+        *TOPICS,
+        bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP", "localhost:29092").split(","),
+        auto_offset_reset=os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest"),
+        enable_auto_commit=False,
+        group_id=os.getenv("KAFKA_GROUP", "minio-consumer-group"),
+        value_deserializer=lambda x: json.loads(x.decode("utf-8")),
+        consumer_timeout_ms=1000,
+        session_timeout_ms=30000,
+        heartbeat_interval_ms=10000,
+        max_poll_records=500,
     )
 
 
-# ── Main consume loop ─────────────────────────────────────────
-print("🚀 Consumer started — listening for Kafka messages …")
-print(f"   Topics : {TOPICS}")
-print(f"   MinIO  : {os.getenv('MINIO_ENDPOINT')} / bucket={BUCKET}")
-print("   Press Ctrl-C to stop\n")
+def create_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=os.getenv("MINIO_ENDPOINT", "http://localhost:9000"),
+        aws_access_key_id=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+        aws_secret_access_key=os.getenv("MINIO_SECRET_KEY", "minioadmin123"),
+    )
 
-try:
-    for message in consumer:
-        topic = message.topic
-        event = message.value
 
-        if not isinstance(event, dict):
-            continue
+def ensure_bucket_exists(s3_client, bucket: str) -> None:
+    existing = {bucket_info["Name"] for bucket_info in s3_client.list_buckets().get("Buckets", [])}
+    if bucket not in existing:
+        s3_client.create_bucket(Bucket=bucket)
+        print(f"✅ Created MinIO bucket: {bucket}")
+    else:
+        print(f"✅ MinIO bucket exists: {bucket}")
 
-        payload = event.get("payload", event)  # handle both wrapped and flat
 
-        # Debezium operation types:
-        #   r = read (snapshot), c = create, u = update, d = delete
-        op = payload.get("op")
-        if op in ("r", "c", "u"):
-            record = payload.get("after")
-        elif op == "d":
-            record = payload.get("before")  # capture deleted row
-        else:
-            # Heartbeat or schema-change event — skip
-            continue
+def route_cdc_record(event: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None, int | None]:
+    payload = event.get("payload", event)
+    op = payload.get("op")
 
-        if record is None:
-            continue
+    if op in {"r", "c", "u"}:
+        record = payload.get("after")
+    elif op == "d":
+        record = payload.get("before")
+    else:
+        return None, None, None
 
-        # Add metadata
-        record["_cdc_op"] = op
-        record["_cdc_ts"] = payload.get("ts_ms")
+    if not isinstance(record, dict):
+        return None, None, None
 
-        table = extract_table_name(topic)
-        buffer[topic].append(record)
-        print(f"  [{table:12s}] op={op} id={record.get('id', '?')}")
+    enriched = dict(record)
+    enriched["_cdc_op"] = op
+    enriched["_cdc_ts"] = payload.get("ts_ms")
+    enriched["_is_deleted"] = op == "d"
+    return enriched, op, payload.get("ts_ms")
 
-        if len(buffer[topic]) >= BATCH_SIZE:
-            write_to_minio(table, buffer[topic])
-            buffer[topic] = []
 
-except KeyboardInterrupt:
-    print("\n\n⚠️  Interrupted — flushing remaining buffers …")
+def normalize_record(table_name: str, record: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    if table_name in {"accounts", "transactions"}:
+        for field in ("balance", "amount"):
+            if field in normalized and normalized[field] is not None:
+                normalized[field] = str(normalized[field])
+    return normalized
 
-finally:
-    # Flush any remaining records
-    for topic, records in buffer.items():
-        if records:
-            write_to_minio(extract_table_name(topic), records)
-    consumer.close()
-    print("✅ Consumer shut down cleanly")
+
+def parquet_key(table_name: str) -> str:
+    now = datetime.now(tz=timezone.utc)
+    return (
+        f"{table_name}/date={now.strftime('%Y-%m-%d')}/"
+        f"{table_name}_{now.strftime('%H%M%S_%f')}.parquet"
+    )
+
+
+def upload_bytes(s3_client, bucket: str, key: str, payload: bytes) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, UPLOAD_RETRIES + 1):
+        try:
+            s3_client.upload_fileobj(io.BytesIO(payload), bucket, key)
+            return
+        except (BotoCoreError, ClientError) as exc:
+            last_error = exc
+            time.sleep(attempt)
+    raise RuntimeError(f"Failed to upload {key}: {last_error}")
+
+
+def write_to_minio(s3_client, table_name: str, records: list[dict[str, Any]]) -> str:
+    if not records:
+        raise ValueError("records must not be empty")
+
+    df = pd.DataFrame(records)
+    arrow_table = pa.Table.from_pandas(df, preserve_index=False)
+    buf = io.BytesIO()
+    pq.write_table(arrow_table, buf)
+    key = parquet_key(table_name)
+    upload_bytes(s3_client, BUCKET, key, buf.getvalue())
+    print(f"  📦 Uploaded {len(records):>4} records -> s3://{BUCKET}/{key}")
+    return key
+
+
+def dlq_key() -> str:
+    now = datetime.now(tz=timezone.utc)
+    return f"{DLQ_PREFIX}/date={now.strftime('%Y-%m-%d')}/bad_events_{now.strftime('%H%M%S_%f')}.jsonl"
+
+
+def write_dlq_event(s3_client, raw_event: Any, reason: str) -> None:
+    payload = json.dumps({"reason": reason, "event": raw_event}, default=str).encode("utf-8") + b"\n"
+    upload_bytes(s3_client, BUCKET, dlq_key(), payload)
+    print(f"  ⚠️ Sent malformed event to DLQ ({reason})")
+
+
+def commit_offsets(consumer: KafkaConsumer, offset_map: dict[tuple[str, int], int]) -> None:
+    if not offset_map:
+        return
+    commit_payload = {
+        TopicPartition(topic, partition): OffsetAndMetadata(offset, None)
+        for (topic, partition), offset in offset_map.items()
+    }
+    consumer.commit(offsets=commit_payload)
+
+
+def should_flush(last_flush_at: float, record_count: int) -> bool:
+    return record_count >= BATCH_SIZE or (time.time() - last_flush_at) >= FLUSH_INTERVAL_SECONDS
+
+
+def flush_topic(
+    consumer: KafkaConsumer,
+    s3_client,
+    topic: str,
+    buffers: dict[str, list[dict[str, Any]]],
+    offset_buffers: dict[str, dict[tuple[str, int], int]],
+) -> None:
+    records = buffers[topic]
+    if not records:
+        return
+    table_name = extract_table_name(topic)
+    write_to_minio(s3_client, table_name, records)
+    commit_offsets(consumer, offset_buffers[topic])
+    buffers[topic] = []
+    offset_buffers[topic] = {}
+
+
+def process_messages() -> None:
+    consumer = create_consumer()
+    s3_client = create_s3_client()
+    ensure_bucket_exists(s3_client, BUCKET)
+
+    buffers: dict[str, list[dict[str, Any]]] = {topic: [] for topic in TOPICS}
+    offset_buffers: dict[str, dict[tuple[str, int], int]] = {
+        topic: {} for topic in TOPICS
+    }
+    last_flush_at: dict[str, float] = defaultdict(time.time)
+
+    print("🚀 Consumer started")
+    print(f"   Topics : {TOPICS}")
+    print(f"   MinIO  : {os.getenv('MINIO_ENDPOINT')} bucket={BUCKET}")
+
+    try:
+        while True:
+            polled = consumer.poll(timeout_ms=1000)
+            for topic_partition, messages in polled.items():
+                for message in messages:
+                    event = message.value
+                    if not isinstance(event, dict):
+                        write_dlq_event(s3_client, event, "non-dict event")
+                        continue
+
+                    record, op, _ = route_cdc_record(event)
+                    if record is None or op is None:
+                        continue
+
+                    topic = message.topic
+                    table_name = extract_table_name(topic)
+                    normalized = normalize_record(table_name, record)
+                    buffers[topic].append(normalized)
+                    offset_buffers[topic][(topic, topic_partition.partition)] = message.offset + 1
+                    print(f"  [{table_name:12s}] op={op} id={normalized.get('id', '?')}")
+
+                    if should_flush(last_flush_at[topic], len(buffers[topic])):
+                        flush_topic(consumer, s3_client, topic, buffers, offset_buffers)
+                        last_flush_at[topic] = time.time()
+
+            for topic in TOPICS:
+                if buffers[topic] and should_flush(last_flush_at[topic], len(buffers[topic])):
+                    flush_topic(consumer, s3_client, topic, buffers, offset_buffers)
+                    last_flush_at[topic] = time.time()
+    except KeyboardInterrupt:
+        print("\nInterrupted. Flushing buffered records.")
+    finally:
+        for topic in TOPICS:
+            if buffers[topic]:
+                flush_topic(consumer, s3_client, topic, buffers, offset_buffers)
+        consumer.close()
+        print("✅ Consumer shut down cleanly")
+
+
+if __name__ == "__main__":
+    process_messages()

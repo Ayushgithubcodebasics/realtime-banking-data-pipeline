@@ -1,0 +1,7 @@
+{
+  "name": "Banking Resume Theme",
+  "dataColors": ["#7C3AED", "#A78BFA", "#C4B5FD", "#2563EB", "#06B6D4", "#10B981", "#F59E0B", "#EF4444"],
+  "background": "#0F172A",
+  "foreground": "#F8FAFC",
+  "tableAccent": "#7C3AED"
+}

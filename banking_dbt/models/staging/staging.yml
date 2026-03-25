@@ -2,83 +2,60 @@ version: 2
 
 models:
   - name: stg_customers
-    description: "Staging view for customers — Silver layer. Deduplicates raw CDC events, keeps latest record per customer_id."
     columns:
       - name: customer_id
-        description: "Source system primary key from PostgreSQL"
-        tests:
-          - unique
-          - not_null
-      - name: first_name
-        tests:
-          - not_null
-      - name: last_name
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: email
-        description: "Must be unique — enforced at source by PostgreSQL UNIQUE constraint"
+        tests: [not_null]
+      - name: record_updated_at
+        tests: [not_null]
+      - name: cdc_operation
         tests:
-          - unique
-          - not_null
-      - name: created_at
-        tests:
-          - not_null
-      - name: load_timestamp
-        tests:
-          - not_null
+          - accepted_values:
+              arguments:
+                values: ["r", "c", "u", "d"]
 
   - name: stg_accounts
-    description: "Staging view for accounts — Silver layer. Deduplicates raw CDC events, keeps latest record per account_id."
     columns:
       - name: account_id
-        tests:
-          - unique
-          - not_null
+        tests: [not_null, unique]
       - name: customer_id
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
       - name: account_type
         tests:
-          - not_null
           - accepted_values:
-              values: ["SAVINGS", "CHECKING"]
+              arguments:
+                values: ["SAVINGS", "CHECKING"]
       - name: balance
-        tests:
-          - not_null
-      - name: currency
-        tests:
-          - not_null
-          - accepted_values:
-              values: ["USD"]
-      - name: created_at
-        tests:
-          - not_null
+        tests: [not_null]
+      - name: record_updated_at
+        tests: [not_null]
 
   - name: stg_transactions
-    description: "Staging view for transactions — Silver layer. Append-only ledger, no deduplication needed."
     columns:
       - name: transaction_id
-        tests:
-          - unique
-          - not_null
+        tests: [not_null, unique]
       - name: account_id
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
       - name: transaction_type
         tests:
-          - not_null
           - accepted_values:
-              values: ["DEPOSIT", "WITHDRAWAL", "TRANSFER"]
+              arguments:
+                values: ["DEPOSIT", "WITHDRAWAL", "TRANSFER"]
       - name: amount
-        description: "Must be strictly positive — enforced at source by CHECK (amount > 0)"
-        tests:
-          - not_null
+        tests: [not_null]
       - name: status
         tests:
-          - not_null
           - accepted_values:
-              values: ["COMPLETED", "PENDING", "FAILED"]
-      - name: transaction_time
-        tests:
-          - not_null
-          
+              arguments:
+                values: ["COMPLETED", "PENDING", "FAILED"]

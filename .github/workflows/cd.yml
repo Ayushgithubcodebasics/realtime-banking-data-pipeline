@@ -1,4 +1,4 @@
-name: CD — Deploy dbt to Production
+name: CD - dbt Deploy
 
 on:
   push:
@@ -6,8 +6,9 @@ on:
 
 jobs:
   deploy-dbt:
-    name: dbt Run + Test (Production Snowflake)
+    name: dbt run and test in Snowflake
     runs-on: ubuntu-latest
+    if: ${{ secrets.SNOWFLAKE_ACCOUNT != '' && secrets.SNOWFLAKE_USER != '' && secrets.SNOWFLAKE_PASSWORD != '' && secrets.SNOWFLAKE_WAREHOUSE != '' }}
 
     steps:
       - name: Checkout repository
@@ -24,75 +25,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install "dbt-snowflake>=1.9.0,<2.0.0"
 
-      - name: Write dbt profiles.yml
+      - name: Write dbt profile
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
         run: |
           mkdir -p ~/.dbt
-          python3 -c "
-          import os
-          content = '\n'.join([
-            'banking_dbt:',
-            '  target: prod',
-            '  outputs:',
-            '    prod:',
-            '      type: snowflake',
-            '      account: \"' + os.environ['SNOWFLAKE_ACCOUNT'] + '\"',
-            '      user: \"' + os.environ['SNOWFLAKE_USER'] + '\"',
-            '      password: \"' + os.environ['SNOWFLAKE_PASSWORD'] + '\"',
-            '      role: ACCOUNTADMIN',
-            '      database: BANKING',
-            '      warehouse: \"' + os.environ['SNOWFLAKE_WAREHOUSE'] + '\"',
-            '      schema: ANALYTICS',
-            '      threads: 4',
-          ])
-          open(os.path.expanduser('~/.dbt/profiles.yml'), 'w').write(content)
-          "
+          cat > ~/.dbt/profiles.yml << EOF
+          banking_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: snowflake
+                account: "${SNOWFLAKE_ACCOUNT}"
+                user: "${SNOWFLAKE_USER}"
+                password: "${SNOWFLAKE_PASSWORD}"
+                role: "${SNOWFLAKE_ROLE:-TRANSFORMER}"
+                database: "BANKING"
+                warehouse: "${SNOWFLAKE_WAREHOUSE}"
+                schema: "ANALYTICS"
+                threads: 4
+          EOF
 
       - name: dbt deps
         working-directory: banking_dbt
         run: dbt deps
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt run staging (Silver layer)
+      - name: dbt run staging
         working-directory: banking_dbt
         run: dbt run --select staging
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt snapshot (SCD2)
+      - name: dbt snapshot
         working-directory: banking_dbt
         run: dbt snapshot
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt run marts (Gold layer)
+      - name: dbt run marts
         working-directory: banking_dbt
         run: dbt run --select marts
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
 
-      - name: dbt test (data quality)
+      - name: dbt test
         working-directory: banking_dbt
         run: dbt test
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}

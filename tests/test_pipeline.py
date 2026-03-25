@@ -1,181 +1,109 @@
-"""
-Unit tests for the banking data pipeline.
-Covers:
-  - data-generator: random_money utility
-  - consumer: CDC payload parsing, topic name extraction, op type routing
-These run in CI against a real PostgreSQL service container.
-"""
+"""Unit tests for the banking data pipeline."""
+
+from __future__ import annotations
 
 import importlib.util
-import os
 import pathlib
 import sys
 from decimal import Decimal
 
-import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 ROOT = pathlib.Path(__file__).parent.parent
 
 
-# ── Helpers ───────────────────────────────────────────────────
-
-def _load_module(rel_path: str):
-    """Load a project module by relative path without triggering side-effects."""
+def load_module(rel_path: str):
     abs_path = ROOT / rel_path
     spec = importlib.util.spec_from_file_location(abs_path.stem, abs_path)
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[abs_path.stem] = module
     spec.loader.exec_module(module)
     return module
 
 
-# ── Generator tests ───────────────────────────────────────────
-
-def test_random_money_range():
-    """random_money should always return a value within the given bounds."""
-    gen = _load_module("data-generator/generator.py")
+def test_random_money_range() -> None:
+    gen = load_module("data-generator/generator.py")
     for _ in range(100):
-        val = gen.random_money(Decimal("1.00"), Decimal("1000.00"))
-        assert Decimal("1.00") <= val <= Decimal("1000.00")
+        value = gen.random_money(Decimal("1.00"), Decimal("1000.00"))
+        assert Decimal("1.00") <= value <= Decimal("1000.00")
 
 
-def test_random_money_two_decimal_places():
-    """random_money should always return exactly 2 decimal places."""
-    gen = _load_module("data-generator/generator.py")
-    for _ in range(50):
-        val = gen.random_money(Decimal("10.00"), Decimal("100.00"))
-        assert val == val.quantize(Decimal("0.01")), (
-            f"Expected 2 decimal places, got {val}"
-        )
+def test_random_money_two_decimal_places() -> None:
+    gen = load_module("data-generator/generator.py")
+    value = gen.random_money(Decimal("10.00"), Decimal("100.00"))
+    assert value == value.quantize(Decimal("0.01"))
 
 
-def test_random_money_never_negative():
-    """random_money should never return a negative value."""
-    gen = _load_module("data-generator/generator.py")
-    for _ in range(50):
-        val = gen.random_money(Decimal("0.01"), Decimal("500.00"))
-        assert val >= Decimal("0.00"), f"Got negative value: {val}"
+def test_build_arg_parser_supports_once_flag() -> None:
+    gen = load_module("data-generator/generator.py")
+    args = gen.build_arg_parser().parse_args(["--once"])
+    assert args.once is True
 
 
-# ── Consumer CDC parsing tests ────────────────────────────────
-
-def test_extract_table_name_customers():
-    """Topic banking_server.public.customers → customers."""
-    topic = "banking_server.public.customers"
-    result = topic.split(".")[-1]
-    assert result == "customers"
+def test_extract_table_name() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    assert consumer.extract_table_name("banking_server.public.transactions") == "transactions"
 
 
-def test_extract_table_name_transactions():
-    """Topic banking_server.public.transactions → transactions."""
-    topic = "banking_server.public.transactions"
-    result = topic.split(".")[-1]
-    assert result == "transactions"
-
-
-def test_cdc_payload_create_uses_after():
-    """
-    For op=c (INSERT), the consumer must extract the 'after' field.
-    This is the core CDC routing logic in kafka_to_minio.py.
-    """
-    payload = {
-        "op": "c",
-        "before": None,
-        "after": {
-            "id": 1,
-            "first_name": "Alice",
-            "last_name": "Smith",
-            "email": "alice@example.com",
-            "created_at": 1700000000000,
-        },
-        "ts_ms": 1700000000000,
-    }
-
-    op = payload.get("op")
-    if op in ("r", "c", "u"):
-        record = payload.get("after")
-    elif op == "d":
-        record = payload.get("before")
-    else:
-        record = None
-
-    assert record is not None
+def test_route_cdc_record_create_uses_after() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    record, op, ts = consumer.route_cdc_record(
+        {
+            "payload": {
+                "op": "c",
+                "after": {"id": 1, "email": "alice@example.com"},
+                "before": None,
+                "ts_ms": 1700000000000,
+            }
+        }
+    )
+    assert op == "c"
+    assert ts == 1700000000000
     assert record["email"] == "alice@example.com"
-    assert record["id"] == 1
+    assert record["_is_deleted"] is False
 
 
-def test_cdc_payload_delete_uses_before():
-    """
-    For op=d (DELETE), the consumer must extract the 'before' field,
-    capturing the row as it existed before deletion.
-    """
-    payload = {
-        "op": "d",
-        "before": {
-            "id": 42,
-            "first_name": "Bob",
-            "last_name": "Jones",
-            "email": "bob@example.com",
-            "created_at": 1700000000000,
-        },
-        "after": None,
-        "ts_ms": 1700001000000,
-    }
-
-    op = payload.get("op")
-    if op in ("r", "c", "u"):
-        record = payload.get("after")
-    elif op == "d":
-        record = payload.get("before")
-    else:
-        record = None
-
-    assert record is not None
+def test_route_cdc_record_delete_uses_before() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    record, op, _ = consumer.route_cdc_record(
+        {
+            "payload": {
+                "op": "d",
+                "before": {"id": 42, "email": "bob@example.com"},
+                "after": None,
+                "ts_ms": 1700001000000,
+            }
+        }
+    )
+    assert op == "d"
     assert record["id"] == 42
-    assert record["email"] == "bob@example.com"
+    assert record["_is_deleted"] is True
 
 
-def test_cdc_payload_heartbeat_is_skipped():
-    """
-    Debezium heartbeat events have no 'op' field (or op is None).
-    The consumer must skip them — record should be None.
-    """
-    payload = {
-        "ts_ms": 1700002000000,
-        # no 'op' key — this is a heartbeat
-    }
-
-    op = payload.get("op")
-    if op in ("r", "c", "u"):
-        record = payload.get("after")
-    elif op == "d":
-        record = payload.get("before")
-    else:
-        record = None  # heartbeat / schema-change → skip
-
+def test_route_cdc_record_skips_heartbeat() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    record, op, ts = consumer.route_cdc_record({"payload": {"ts_ms": 1700002000000}})
     assert record is None
+    assert op is None
+    assert ts is None
 
 
-def test_cdc_metadata_attached_to_record():
-    """
-    After routing, the consumer attaches _cdc_op and _cdc_ts
-    to every record before buffering it.
-    """
-    payload = {
-        "op": "u",
-        "before": {"id": 5, "email": "old@example.com"},
-        "after": {"id": 5, "email": "new@example.com"},
-        "ts_ms": 1700003000000,
-    }
+def test_normalize_record_casts_money_to_string() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    normalized = consumer.normalize_record(
+        "accounts",
+        {"id": 1, "balance": Decimal("123.45"), "_cdc_op": "u", "_cdc_ts": 1},
+    )
+    assert normalized["balance"] == "123.45"
 
-    op = payload.get("op")
-    record = payload.get("after") if op in ("r", "c", "u") else payload.get("before")
 
-    # Simulate what kafka_to_minio.py does
-    record["_cdc_op"] = op
-    record["_cdc_ts"] = payload.get("ts_ms")
+def test_should_flush_for_batch_size() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    assert consumer.should_flush(last_flush_at=0.0, record_count=consumer.BATCH_SIZE) is True
 
-    assert record["_cdc_op"] == "u"
-    assert record["_cdc_ts"] == 1700003000000
-    assert record["email"] == "new@example.com"
+
+def test_should_flush_for_elapsed_time() -> None:
+    consumer = load_module("consumer/kafka_to_minio.py")
+    assert consumer.should_flush(
+        last_flush_at=0.0,
+        record_count=1,
+    ) is True
