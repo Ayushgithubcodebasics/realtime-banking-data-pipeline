@@ -8,24 +8,42 @@ jobs:
   deploy-dbt:
     name: dbt run and test in Snowflake
     runs-on: ubuntu-latest
-    if: ${{ secrets.SNOWFLAKE_ACCOUNT != '' && secrets.SNOWFLAKE_USER != '' && secrets.SNOWFLAKE_PASSWORD != '' && secrets.SNOWFLAKE_WAREHOUSE != '' }}
 
     steps:
+      - name: Check required Snowflake secrets
+        id: check_secrets
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: |
+          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ] || [ -z "$SNOWFLAKE_WAREHOUSE" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Snowflake secrets are missing. Skipping CD job steps."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
+        if: steps.check_secrets.outputs.ready == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Python 3.11
+        if: steps.check_secrets.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
       - name: Install dbt-snowflake
+        if: steps.check_secrets.outputs.ready == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install "dbt-snowflake>=1.9.0,<2.0.0"
 
       - name: Write dbt profile
+        if: steps.check_secrets.outputs.ready == 'true'
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -51,21 +69,30 @@ jobs:
           EOF
 
       - name: dbt deps
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt deps
 
       - name: dbt run staging
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt run --select staging
 
       - name: dbt snapshot
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt snapshot
 
       - name: dbt run marts
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt run --select marts
 
       - name: dbt test
+        if: steps.check_secrets.outputs.ready == 'true'
         working-directory: banking_dbt
         run: dbt test
+
+      - name: CD skipped
+        if: steps.check_secrets.outputs.ready != 'true'
+        run: echo "CD skipped because required Snowflake secrets are not configured."
