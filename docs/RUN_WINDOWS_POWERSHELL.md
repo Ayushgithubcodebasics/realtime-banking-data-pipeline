@@ -1,62 +1,80 @@
-# Windows PowerShell Run Guide
+# Run Guide (Windows PowerShell)
 
-## 1) Open the project folder
+This guide uses generic paths and public-repo-safe examples. Replace placeholders with your own values.
+
+## 1) Prerequisites
+
+- Docker Desktop running
+- Python 3.11 installed and available in PowerShell
+- A Snowflake account and credentials
+- Power BI Desktop if you want to build the report layer
+
+## 2) Open the project folder
 
 ```powershell
-cd "C:\path\to\realtime-banking-data-pipeline-main"
+cd "C:\path\to\realtime-banking-data-pipeline"
 ```
 
-## 2) Create local config files
+## 3) Create your local config files
 
 ```powershell
 Copy-Item .env.example .env
+New-Item -ItemType Directory -Force banking_dbt\.dbt | Out-Null
 Copy-Item banking_dbt\.dbt\profiles.yml.example banking_dbt\.dbt\profiles.yml
 ```
 
-Edit both files before continuing.
+Then edit both files and replace every `change-me-*` placeholder with your real local values.
 
-## 3) Start core services
+## 4) Install Python dependencies for local commands
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+## 5) Start the core platform
 
 ```powershell
 docker compose up -d --build
-```
-
-Check service status:
-
-```powershell
 docker compose ps
 ```
 
-## 4) Register the Debezium connector
+Core services:
+- PostgreSQL
+- Debezium Connect
+- Kafka
+- Zookeeper
+- MinIO
+- Airflow webserver
+- Airflow scheduler
+- Airflow metadata PostgreSQL
+
+## 6) Register the Debezium connector
 
 ```powershell
 python .\kafka-debezium\register_connector.py
 ```
 
-Expected result: the connector should reach `RUNNING`.
-
-## 5) Start the data-producing app services
+## 7) Start the generator and consumer
 
 ```powershell
 docker compose --profile apps up -d generator consumer
+docker compose ps
 ```
 
-## 6) Watch logs
+If you want a short demo run instead of an endless generator, set `GENERATOR_MAX_ITERATIONS` in `.env` to a small number such as `5` or `20`.
 
-```powershell
-docker compose logs -f generator
-docker compose logs -f consumer
-docker compose logs -f airflow-scheduler
-docker compose logs -f airflow-webserver
-```
-
-## 7) Open the UIs
+## 8) Open the local UIs
 
 - Airflow: `http://localhost:8080`
 - Debezium Connect: `http://localhost:8083/connectors`
 - MinIO Console: `http://localhost:9001`
 
-## 8) Run dbt manually if needed
+Use the Airflow admin credentials from your local `.env`.
+
+## 9) Run dbt manually if needed
 
 ```powershell
 cd banking_dbt
@@ -68,22 +86,25 @@ dbt test
 cd ..
 ```
 
-## 9) Validate code quality locally
+## 10) Useful troubleshooting commands
 
 ```powershell
-python -m pip install -r requirements.txt
-ruff check .
-pytest tests -v
+docker compose logs -f connect
+docker compose logs -f kafka
+docker compose logs -f consumer
+docker compose logs -f generator
+docker compose logs -f airflow-webserver
+docker compose logs -f airflow-scheduler
 ```
 
-## 10) Stop everything
+## 11) Stop the stack
 
 ```powershell
-docker compose --profile apps down
+docker compose down
 ```
 
-To remove volumes too:
+To remove named volumes as well:
 
 ```powershell
-docker compose --profile apps down -v
+docker compose down -v
 ```

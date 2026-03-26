@@ -5,10 +5,12 @@ models:
     columns:
       - name: customer_id
         tests: [not_null, unique]
+
   - name: pbi_dim_accounts_current
     columns:
       - name: account_id
         tests: [not_null, unique]
+
   - name: pbi_fact_transactions
     columns:
       - name: transaction_id
@@ -17,6 +19,7 @@ models:
         tests: [not_null]
       - name: customer_sk
         tests: [not_null]
+
   - name: pbi_dim_date
     columns:
       - name: date_day

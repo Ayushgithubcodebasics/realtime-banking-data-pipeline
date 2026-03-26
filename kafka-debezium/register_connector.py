@@ -9,7 +9,15 @@ import time
 
 import requests
 
-from common.config import load_project_env
+try:
+    from common.config import load_project_env
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from pathlib import Path
+
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from common.config import load_project_env
 
 load_project_env()
 
@@ -101,9 +109,7 @@ def wait_for_running(timeout: int = 90) -> None:
             connector_state = status.get("connector", {}).get("state", "")
             task_states = [task.get("state", "") for task in status.get("tasks", [])]
             print(f"  connector={connector_state} tasks={task_states}")
-            if connector_state == "RUNNING" and task_states and all(
-                state == "RUNNING" for state in task_states
-            ):
+            if connector_state == "RUNNING" and task_states and all(state == "RUNNING" for state in task_states):
                 print("✅ CDC connector is RUNNING")
                 return
             if connector_state == "FAILED" or "FAILED" in task_states:

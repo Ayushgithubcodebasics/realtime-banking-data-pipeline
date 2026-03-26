@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: raw
-    description: "Bronze layer loaded from MinIO parquet files"
+    description: Bronze layer loaded from MinIO parquet files
     database: BANKING
     schema: RAW
     tables:
@@ -15,6 +15,7 @@ sources:
               - accepted_values:
                   arguments:
                     values: ["r", "c", "u", "d"]
+
       - name: accounts
         columns:
           - name: id
@@ -26,6 +27,7 @@ sources:
               - accepted_values:
                   arguments:
                     values: ["r", "c", "u", "d"]
+
       - name: transactions
         columns:
           - name: id

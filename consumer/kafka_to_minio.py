@@ -27,7 +27,16 @@ from botocore.exceptions import BotoCoreError, ClientError
 from kafka import KafkaConsumer
 from kafka.structs import OffsetAndMetadata, TopicPartition
 
-from common.config import env_int, load_project_env
+try:
+    from common.config import env_int, load_project_env
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    import sys
+    from pathlib import Path
+
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from common.config import env_int, load_project_env
 
 load_project_env()
 
@@ -192,9 +201,7 @@ def process_messages() -> None:
     ensure_bucket_exists(s3_client, BUCKET)
 
     buffers: dict[str, list[dict[str, Any]]] = {topic: [] for topic in TOPICS}
-    offset_buffers: dict[str, dict[tuple[str, int], int]] = {
-        topic: {} for topic in TOPICS
-    }
+    offset_buffers: dict[str, dict[tuple[str, int], int]] = {topic: {} for topic in TOPICS}
     last_flush_at: dict[str, float] = defaultdict(time.time)
 
     print("🚀 Consumer started")

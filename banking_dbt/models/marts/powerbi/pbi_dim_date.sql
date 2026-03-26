@@ -6,11 +6,20 @@ WITH bounds AS (
         COALESCE(MAX(transaction_date), DATEADD('day', 365, CURRENT_DATE)) AS max_date
     FROM {{ ref('fact_transactions') }}
 ),
+
+numbers AS (
+    SELECT SEQ4() AS day_offset
+    FROM TABLE(GENERATOR(ROWCOUNT => 5000))
+),
+
 spine AS (
-    SELECT DATEADD(day, SEQ4(), min_date) AS date_day
-    FROM bounds, TABLE(GENERATOR(ROWCOUNT => 5000))
-    QUALIFY date_day <= max_date
+    SELECT
+        DATEADD(day, day_offset, min_date) AS date_day,
+        max_date
+    FROM bounds
+    CROSS JOIN numbers
 )
+
 SELECT
     date_day,
     YEAR(date_day) AS year_no,
@@ -23,3 +32,4 @@ SELECT
     TO_VARCHAR(date_day, 'YYYY-MM') AS year_month,
     TO_VARCHAR(date_day, 'YYYY-MM-DD') AS date_key
 FROM spine
+WHERE date_day <= max_date

@@ -1,23 +1,22 @@
 # Resume and Interview Notes
 
-## Resume-safe description
+## Resume-safe summary
 
-Built an end-to-end data engineering pipeline for banking analytics using PostgreSQL, Debezium, Kafka, MinIO, Snowflake, dbt, Airflow, GitHub Actions, and Power BI.
+Built an end-to-end CDC data pipeline for banking analytics using PostgreSQL, Debezium, Kafka, MinIO, Snowflake, dbt, Airflow, GitHub Actions, and Power BI.
 
-## What this project proves
+## What this project demonstrates
 
-- CDC ingestion with insert, update, and delete handling
-- dimensional modeling with SCD2 snapshots
-- warehouse transformations with dbt
-- orchestration with Airflow
-- CI/CD with GitHub Actions
-- DirectQuery-ready semantic serving models for Power BI
+- Change data capture ingestion instead of static batch-only processing
+- Raw landing-zone design before warehouse transformation
+- SCD Type 2 dimensional modeling with dbt snapshots
+- Airflow orchestration across ingestion and transformation stages
+- Automated validation with Ruff, pytest, and dbt parse in CI
+- BI-serving models prepared for Power BI DirectQuery-style reporting
 
-## What to say in interviews
+## Strong interview talking points
 
-1. The original tutorial-style version was tool-heavy but weak on correctness.
-2. I fixed the pipeline to deduplicate by CDC timestamp instead of `created_at`.
-3. I changed the fact table to join dimensions by effective date range.
-4. I fixed CI so tests can no longer fail silently.
-5. I added serving models for Power BI, CDC audit, and pipeline health.
-6. I documented the run flow for Windows PowerShell and Docker Desktop.
+1. The pipeline handles inserts, updates, and deletes end to end.
+2. The raw layer preserves CDC metadata instead of throwing it away early.
+3. The marts are designed for historical correctness, not just easy joins.
+4. The repo is structured like a project you could hand to another engineer, not just a tutorial notebook.
+5. The BI layer is intentionally modeled as serving views rather than exposing raw warehouse tables directly.

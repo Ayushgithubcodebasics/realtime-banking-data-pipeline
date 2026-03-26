@@ -23,7 +23,15 @@ import psycopg2
 from faker import Faker
 from psycopg2.extensions import connection
 
-from common.config import env_float, env_int, load_project_env
+try:
+    from common.config import env_float, env_int, load_project_env
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from pathlib import Path
+
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from common.config import env_float, env_int, load_project_env
 
 load_project_env()
 
@@ -392,13 +400,16 @@ def main() -> None:
     conn = get_connection()
     print("✅ Connected to PostgreSQL")
 
+    max_iterations = env_int("GENERATOR_MAX_ITERATIONS", 0)  # 0 = unlimited
+
     iteration = 0
     try:
         while True:
             iteration += 1
             stats = run_iteration(conn)
             print(f"iteration {iteration:03d} -> {format_stats(stats)}")
-            if args.once:
+            if args.once or (max_iterations > 0 and iteration >= max_iterations):
+                print(f"✅ Completed {iteration} iteration(s). Generator stopping cleanly.")
                 break
             time.sleep(SLEEP_SECONDS)
     except KeyboardInterrupt:

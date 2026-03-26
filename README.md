@@ -1,81 +1,117 @@
-# Real-Time Banking Data Engineering Project
+# Real-Time Banking Data Pipeline
 
-An end-to-end data engineering portfolio project that demonstrates:
+An end-to-end data engineering project that captures banking-style change data from PostgreSQL, streams it through Debezium and Kafka, lands raw CDC data in MinIO as Parquet, loads it into Snowflake, transforms it with dbt, orchestrates it with Airflow, and serves analytics-ready models for Power BI.
 
-- PostgreSQL as the OLTP source system
-- Debezium + Kafka for CDC streaming
-- MinIO as the raw landing zone
-- Snowflake as the warehouse
-- dbt for staging, SCD2 dimensions, marts, and Power BI serving models
-- Airflow orchestration
-- GitHub Actions for CI/CD
-- Power BI DirectQuery semantic model and dashboard blueprint
+## Why this project matters
 
-This version fixes the biggest gaps from the original repo:
+This repository is designed to demonstrate practical data engineering skills, not just tool familiarity. It shows how to:
 
-- CI now fails when tests fail
-- the generator now produces inserts, updates, and delete-style events
-- money values are preserved as exact decimal strings in CDC and cast in Snowflake/dbt
-- staging logic now deduplicates by CDC timestamp instead of `created_at`
-- facts now join to the correct SCD2 dimension version using effective dates
-- Airflow only triggers dbt after a successful Snowflake load
-- Power BI-friendly models are included in dbt (`PBI_*`)
-
----
+- ingest **CDC events** instead of relying on static batch files
+- preserve a **raw landing zone** before transformation
+- build **staging, snapshot, dimension, fact, and BI-serving layers** in dbt
+- orchestrate multi-step workflows with **Airflow**
+- validate code quality with **pytest, Ruff, and GitHub Actions**
+- prepare a warehouse model that is usable for **DirectQuery-style reporting in Power BI**
 
 ## Architecture
 
-```text
-PostgreSQL -> Debezium -> Kafka -> Consumer -> MinIO -> Airflow -> Snowflake RAW
-                                                            -> dbt staging/snapshots/marts
-                                                            -> Power BI DirectQuery
-```
+![End-to-end architecture](docs/images/architecture-overview.png)
 
----
+**Flow:** PostgreSQL → Debezium → Kafka → Consumer → MinIO → Airflow → Snowflake RAW → dbt staging/snapshots/marts → Power BI
 
-## Repository structure
+## Tech stack
+
+- **Source system:** PostgreSQL
+- **CDC:** Debezium
+- **Streaming:** Apache Kafka
+- **Object storage / landing zone:** MinIO
+- **Warehouse:** Snowflake
+- **Transformations:** dbt
+- **Orchestration:** Apache Airflow
+- **Analytics / BI:** Power BI
+- **Language:** Python 3.11
+- **Local platform:** Docker Compose
+- **CI/CD:** GitHub Actions
+
+## Key features
+
+- End-to-end **CDC pipeline** using Debezium and Kafka
+- Table-wise Parquet landing in MinIO for raw data retention
+- Snowflake bronze/raw ingestion triggered from Airflow
+- dbt staging models with CDC-aware deduplication logic
+- SCD Type 2 snapshots for customers and accounts
+- Fact model joined to the **correct historical dimension version** using effective date windows
+- Power BI-ready serving views for dimensions, facts, date, CDC audit, and pipeline health
+- Unit tests for generator and consumer behavior
+- CI pipeline for linting, testing, and dbt parse validation
+
+## Project structure
 
 ```text
 .
-├── .github/workflows/            # CI/CD pipelines
-├── banking_dbt/                  # dbt project
-├── common/                       # shared config loader
-├── consumer/                     # Kafka -> MinIO consumer
-├── data-generator/               # Postgres transaction/activity generator
-├── docker/dags/                  # Airflow DAGs
-├── docs/                         # runbooks and setup notes
-├── kafka-debezium/               # connector registration script
-├── postgres/                     # OLTP schema
-├── powerbi/                      # DAX, theme, and report blueprint
-├── scripts/                      # helper PowerShell notes/scripts
-└── snowflake/                    # Snowflake setup SQL
+├── .github/workflows/              # CI/CD workflows
+├── banking_dbt/                    # dbt project: staging, snapshots, marts, BI views
+├── common/                         # shared config loading helpers
+├── consumer/                       # Kafka -> MinIO CDC consumer
+├── data-generator/                 # synthetic banking activity generator
+├── docker/dags/                    # Airflow DAGs
+├── docs/                           # runbooks, notes, and screenshots
+├── kafka-debezium/                 # Debezium connector registration script
+├── postgres/                       # source schema/bootstrap SQL
+├── powerbi/                        # DAX guidance, theme, and report blueprint
+├── scripts/                        # helper scripts
+├── snowflake/                      # Snowflake setup SQL
+├── docker-compose.yml              # local stack definition
+├── dockerfile-airflow.dockerfile   # Airflow image
+└── dockerfile-app.dockerfile       # app image for generator/consumer
 ```
 
----
+## Pipeline flow
 
-## Data model summary
+### 1. Source data generation
+A Python generator writes inserts, updates, deletes, and transaction activity into PostgreSQL banking tables.
 
-### PostgreSQL source tables
+### 2. CDC capture
+Debezium reads PostgreSQL WAL changes and publishes CDC events to Kafka topics.
 
-- `customers`
-- `accounts`
-- `transactions`
+### 3. Raw ingestion
+A Python consumer reads Kafka events, enriches them with CDC metadata, batches them, and writes table-specific Parquet files to MinIO.
 
-### dbt outputs
+### 4. Warehouse loading
+An Airflow DAG polls MinIO for new Parquet files and loads only unprocessed files into Snowflake `RAW` tables.
 
-#### Staging
+### 5. Transformations
+A second Airflow DAG runs dbt in sequence:
+- staging models
+- SCD2 snapshots
+- marts
+- tests
+
+### 6. BI serving
+Power BI connects to dbt-produced serving models built for direct analytical consumption.
+
+## Data model layers
+
+### RAW layer
+Snowflake `RAW` stores landed CDC data from MinIO.
+
+### Staging layer
 - `stg_customers`
 - `stg_accounts`
 - `stg_transactions`
 
-#### SCD2 dimensions
+These models standardize types, normalize CDC columns, and deduplicate records using CDC timestamps and load timestamps.
+
+### Snapshot / SCD2 layer
+- `customers_snapshot`
+- `accounts_snapshot`
+
+### Gold / marts layer
 - `dim_customers`
 - `dim_accounts`
-
-#### Facts
 - `fact_transactions`
 
-#### Power BI serving models
+### Power BI serving layer
 - `pbi_dim_customers_current`
 - `pbi_dim_accounts_current`
 - `pbi_fact_transactions`
@@ -83,126 +119,142 @@ PostgreSQL -> Debezium -> Kafka -> Consumer -> MinIO -> Airflow -> Snowflake RAW
 - `pbi_cdc_audit`
 - `pbi_pipeline_health`
 
----
+## Setup
 
-## Before you start
+### Prerequisites
 
-1. Install Docker Desktop
-2. Install Python 3.11+
-3. Install Power BI Desktop
-4. Create a Snowflake database user/role for this project
-5. Copy `.env.example` to `.env`
-6. Copy `banking_dbt/.dbt/profiles.yml.example` to `banking_dbt/.dbt/profiles.yml`
+- Docker Desktop
+- Python **3.11**
+- Snowflake account with permissions to create and use the project database objects
+- Power BI Desktop for the reporting layer
 
----
+### Local configuration
 
-## Quick start (Windows PowerShell)
+1. Copy `.env.example` to `.env`
+2. Copy `banking_dbt/.dbt/profiles.yml.example` to `banking_dbt/.dbt/profiles.yml`
+3. Fill in your real Snowflake values locally
+4. Keep both files out of Git
 
-See the full walkthrough in `docs/RUN_WINDOWS_POWERSHELL.md`.
+## How to run
 
-Minimal flow:
+### Start core services
 
 ```powershell
-Copy-Item .env.example .env
-Copy-Item banking_dbt\.dbt\profiles.yml.example banking_dbt\.dbt\profiles.yml
-
 docker compose up -d --build
-python .\kafka-debezium\register_connector.py
+docker compose ps
+```
 
+### Register the Debezium connector
+
+```powershell
+python .\kafka-debezium\register_connector.py
+```
+
+### Start the app services
+
+```powershell
 docker compose --profile apps up -d generator consumer
 ```
 
-Open:
+### Open the local UIs
 
 - Airflow: `http://localhost:8080`
-- Debezium: `http://localhost:8083/connectors`
+- Debezium Connect: `http://localhost:8083/connectors`
 - MinIO Console: `http://localhost:9001`
 
----
-
-## Snowflake setup
-
-Run this once in Snowflake:
-
-```sql
--- open and run
-snowflake/setup.sql
-```
-
-Then update `banking_dbt/.dbt/profiles.yml` with your real credentials.
-
----
-
-## dbt commands
+### Run dbt manually when needed
 
 ```powershell
 cd banking_dbt
-
 dbt deps
 dbt run --select staging
 dbt snapshot
 dbt run --select marts
 dbt test
+cd ..
 ```
 
----
+## Proof of execution
 
-## CI/CD
+### Local services running in Docker
+![Docker services running](docs/images/docker-services-running.png)
 
-### CI
+### Debezium connector successfully registered and running
+![Debezium connector](docs/images/debezium-connector-running.png)
 
-Runs on every push/PR:
+### Generator and consumer containers built and started
+![Generator and consumer build and start](docs/images/generator-consumer-startup.png)
 
-- `ruff check .`
-- `pytest tests -v`
-- `dbt parse`
+### Generator producing iterative banking activity
+![Generator iterations](docs/images/generator-iterations.png)
 
-### CD
+### Consumer receiving CDC events and writing Parquet batches
+![Consumer writing batches](docs/images/consumer-receiving-events.png)
 
-Runs only when Snowflake secrets are configured:
+### MinIO raw bucket organized by source table
+![MinIO raw bucket](docs/images/minio-raw-bucket.png)
 
-- `dbt run --select staging`
-- `dbt snapshot`
-- `dbt run --select marts`
-- `dbt test`
+### Airflow DAG inventory
+![Airflow DAG list](docs/images/airflow-dag-list.png)
 
----
+### Airflow bronze load DAG: MinIO to Snowflake RAW
+![Airflow bronze DAG](docs/images/airflow-bronze-dag.png)
 
-## Power BI recommendation
+### Airflow dbt DAG: staging, snapshot, marts, tests
+![Airflow dbt DAG](docs/images/airflow-dbt-dag.png)
 
-Do **not** use the original PBIX as the final proof of the project without redesigning it.
+### Snowflake raw and analytics objects populated
+![Snowflake database structure](docs/images/snowflake-database-structure.png)
 
-Use these serving models instead:
+## Engineering decisions and improvements
 
-- `PBI_FACT_TRANSACTIONS`
-- `PBI_DIM_ACCOUNTS_CURRENT`
-- `PBI_DIM_CUSTOMERS_CURRENT`
-- `PBI_DIM_DATE`
-- `PBI_CDC_AUDIT`
-- `PBI_PIPELINE_HEALTH`
+This version improves the project in several important ways:
 
-Then follow:
+- **CDC-aware deduplication:** staging models use CDC timestamps and load timestamps instead of weaker ordering assumptions
+- **Historical correctness:** the fact table joins to the right SCD2 record using effective date windows
+- **Safer consumer behavior:** offsets are committed only after successful upload
+- **Raw traceability:** CDC metadata is preserved through ingestion and transformation
+- **Operational visibility:** BI-serving models include CDC audit and pipeline health views
+- **Automated validation:** tests and linting are wired into GitHub Actions
 
-- `powerbi/Measures_DAX.md`
-- `powerbi/Report_Blueprint.md`
-- `powerbi/Banking_Theme.json`
+## Challenges solved
 
----
+- Converting noisy CDC records into analytics-ready models
+- Handling inserts, updates, and deletes consistently across the stack
+- Preserving monetary values safely through the ingestion path
+- Ensuring dbt marts align with historical dimension versions
+- Orchestrating raw loads and downstream transformations cleanly in Airflow
+- Packaging the project so it can be run locally with Docker Compose
 
-## Local validation
+## Portfolio / resume value
 
-```powershell
-python -m pip install -r requirements.txt
-ruff check .
-pytest tests -v
-```
+This project demonstrates experience with:
 
----
+- end-to-end data pipeline design
+- CDC ingestion patterns
+- warehouse modeling and SCD2
+- orchestration and workflow dependencies
+- local platform engineering with Docker
+- analytics serving for BI tools
+- CI/CD and project documentation
 
-## Known limitations
+A recruiter or hiring manager reviewing this repository should be able to see not just code, but a complete engineering workflow: ingestion, orchestration, transformation, testing, and analytics delivery.
 
-- A fully modified `.pbix` file is **not** included because PBIX editing cannot be safely validated in this environment without Power BI Desktop.
-- Snowflake execution cannot be fully end-to-end verified here because live credentials are not available.
-- Airflow/dbt/Snowflake runtime validation depends on your real Snowflake connection settings.
+## Repository hygiene notes
 
-That said, the codebase, tests, models, runbooks, and Power BI blueprint are prepared so you can run and validate the project properly on your machine.
+The following should **not** be committed:
+
+- `.env`
+- `banking_dbt/.dbt/profiles.yml`
+- virtual environments
+- dbt `target/` and `logs/`
+- Airflow runtime logs
+- local cache files
+- temporary backup files
+
+## Future enhancements
+
+- Add data quality alerts from Airflow or dbt test failures
+- Add observability dashboards for row counts and latency
+- Add schema evolution handling tests
+- Add a polished Power BI dashboard screenshot once the final report is complete

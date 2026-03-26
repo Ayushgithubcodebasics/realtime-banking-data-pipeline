@@ -179,7 +179,7 @@ services:
       context: .
       dockerfile: dockerfile-app.dockerfile
     container_name: banking-generator
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
@@ -191,6 +191,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       GENERATOR_SLEEP_SECONDS: ${GENERATOR_SLEEP_SECONDS:-5}
+      GENERATOR_MAX_ITERATIONS: ${GENERATOR_MAX_ITERATIONS:-0}
     networks:
       - banking-mds-net
     profiles: ["apps"]
@@ -246,7 +247,7 @@ services:
     command: >
       bash -c "airflow db migrate &&
       airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD}
-      --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} && echo OK"
+      --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} || true"
     depends_on:
       airflow-postgres:
         condition: service_healthy

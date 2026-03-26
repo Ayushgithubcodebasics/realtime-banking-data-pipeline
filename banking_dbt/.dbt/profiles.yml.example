@@ -3,13 +3,13 @@ banking_dbt:
   outputs:
     prod:
       type: snowflake
-      account: "YOUR_ACCOUNT_IDENTIFIER"   # e.g. abc12345-myorg
-      user: "YOUR_USERNAME"
-      password: "YOUR_PASSWORD"
-      role: ACCOUNTADMIN
-      database: BANKING
-      warehouse: COMPUTE_WH
-      schema: ANALYTICS
+      account: "change-me-snowflake-account"
+      user: "change-me-snowflake-user"
+      password: "change-me-snowflake-password"
+      role: "change-me-snowflake-role"
+      database: "BANKING"
+      warehouse: "COMPUTE_WH"
+      schema: "ANALYTICS"
       threads: 4
       client_session_keep_alive: false
-      query_tag: banking_dbt_prod
+      query_tag: "banking_dbt_prod"

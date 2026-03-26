@@ -1,27 +1,22 @@
 # What Was Fixed
 
-## Code and data correctness
-- generator now produces insert/update/delete-style activity
-- generator updates account balances when transactions occur
-- raw money values flow as strings from Debezium and are cast to decimal in Snowflake/dbt
-- staging deduplicates by CDC timestamp and load timestamp, not `created_at`
-- facts join to dimension versions using SCD2 effective date windows
+## Data correctness
+- The staging layer deduplicates CDC records using CDC timestamps and load timestamps instead of weaker ordering assumptions.
+- Monetary values are preserved through CDC ingestion and cast in Snowflake/dbt instead of being silently coerced too early.
+- The fact model joins to the correct SCD2 dimension version using effective date windows.
 
 ## Reliability
-- Kafka consumer now uses manual offset commits after successful uploads
-- malformed events can be sent to a DLQ prefix in MinIO
-- consumer is import-safe for unit testing
-- Airflow only triggers dbt after successful loads
-- Snowflake loads use `ON_ERROR = ABORT_STATEMENT`
+- The Kafka consumer commits offsets only after a successful MinIO upload.
+- Malformed events can be written to a DLQ prefix in MinIO.
+- Airflow triggers downstream dbt work only after a successful Snowflake RAW load.
+- Snowflake copy operations use `ON_ERROR = ABORT_STATEMENT`.
 
-## Dev workflow
-- CI now fails properly on failing tests
-- CI uses `dbt parse` instead of requiring live Snowflake secrets
-- Docker Compose includes optional app services for the generator and consumer
-- PowerShell run guide added
+## Developer experience
+- Unit tests run without side effects at import time.
+- CI validates Ruff, pytest, and `dbt parse`.
+- The public docs were scrubbed to remove local-machine paths, local secrets, and migration noise.
+- The repository now excludes generated artifacts, caches, and local runtime files.
 
-## Analytics and BI
-- added Power BI serving models
-- added CDC audit model
-- added pipeline health model
-- added DAX recommendations and a report blueprint
+## Analytics serving
+- Power BI serving views are included for dimensions, facts, CDC audit, date, and pipeline health.
+- The repo includes a DAX starter pack and a report blueprint instead of pretending a polished PBIX file is already finished.
