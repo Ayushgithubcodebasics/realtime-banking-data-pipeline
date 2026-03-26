@@ -17,10 +17,11 @@ jobs:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
         run: |
-          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ] || [ -z "$SNOWFLAKE_WAREHOUSE" ]; then
+          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ] || [ -z "$SNOWFLAKE_WAREHOUSE" ] || [ -z "$SNOWFLAKE_ROLE" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Snowflake secrets are missing. Skipping CD job steps."
+            echo "Required Snowflake secrets are missing. Skipping CD job steps."
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -61,7 +62,7 @@ jobs:
                 account: "${SNOWFLAKE_ACCOUNT}"
                 user: "${SNOWFLAKE_USER}"
                 password: "${SNOWFLAKE_PASSWORD}"
-                role: "${SNOWFLAKE_ROLE:-TRANSFORMER}"
+                role: "${SNOWFLAKE_ROLE}"
                 database: "BANKING"
                 warehouse: "${SNOWFLAKE_WAREHOUSE}"
                 schema: "ANALYTICS"
