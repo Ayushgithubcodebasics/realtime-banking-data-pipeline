@@ -17,7 +17,7 @@ This repository is designed to demonstrate practical data engineering skills, no
 
 ![End-to-end architecture](docs/images/architecture-overview.png)
 
-**Flow:** PostgreSQL → Debezium → Kafka → Consumer → MinIO → Airflow → Snowflake RAW → dbt staging/snapshots/marts → Power BI
+**Flow:** PostgreSQL â†’ Debezium â†’ Kafka â†’ Consumer â†’ MinIO â†’ Airflow â†’ Snowflake RAW â†’ dbt staging/snapshots/marts â†’ Power BI
 
 ## Tech stack
 
@@ -49,21 +49,21 @@ This repository is designed to demonstrate practical data engineering skills, no
 
 ```text
 .
-├── .github/workflows/              # CI/CD workflows
-├── banking_dbt/                    # dbt project: staging, snapshots, marts, BI views
-├── common/                         # shared config loading helpers
-├── consumer/                       # Kafka -> MinIO CDC consumer
-├── data-generator/                 # synthetic banking activity generator
-├── docker/dags/                    # Airflow DAGs
-├── docs/                           # runbooks, notes, and screenshots
-├── kafka-debezium/                 # Debezium connector registration script
-├── postgres/                       # source schema/bootstrap SQL
-├── powerbi/                        # DAX guidance, theme, and report blueprint
-├── scripts/                        # helper scripts
-├── snowflake/                      # Snowflake setup SQL
-├── docker-compose.yml              # local stack definition
-├── dockerfile-airflow.dockerfile   # Airflow image
-└── dockerfile-app.dockerfile       # app image for generator/consumer
+â”œâ”€â”€ .github/workflows/              # CI/CD workflows
+â”œâ”€â”€ banking_dbt/                    # dbt project: staging, snapshots, marts, BI views
+â”œâ”€â”€ common/                         # shared config loading helpers
+â”œâ”€â”€ consumer/                       # Kafka -> MinIO CDC consumer
+â”œâ”€â”€ data-generator/                 # synthetic banking activity generator
+â”œâ”€â”€ docker/dags/                    # Airflow DAGs
+â”œâ”€â”€ docs/                           # runbooks, notes, and screenshots
+â”œâ”€â”€ kafka-debezium/                 # Debezium connector registration script
+â”œâ”€â”€ postgres/                       # source schema/bootstrap SQL
+â”œâ”€â”€ powerbi/                        # DAX guidance, theme, and report blueprint
+â”œâ”€â”€ scripts/                        # helper scripts
+â”œâ”€â”€ snowflake/                      # Snowflake setup SQL
+â”œâ”€â”€ docker-compose.yml              # local stack definition
+â”œâ”€â”€ dockerfile-airflow.dockerfile   # Airflow image
+â””â”€â”€ dockerfile-app.dockerfile       # app image for generator/consumer
 ```
 
 ## Pipeline flow
@@ -225,36 +225,3 @@ This version improves the project in several important ways:
 - Ensuring dbt marts align with historical dimension versions
 - Orchestrating raw loads and downstream transformations cleanly in Airflow
 - Packaging the project so it can be run locally with Docker Compose
-
-## Portfolio / resume value
-
-This project demonstrates experience with:
-
-- end-to-end data pipeline design
-- CDC ingestion patterns
-- warehouse modeling and SCD2
-- orchestration and workflow dependencies
-- local platform engineering with Docker
-- analytics serving for BI tools
-- CI/CD and project documentation
-
-A recruiter or hiring manager reviewing this repository should be able to see not just code, but a complete engineering workflow: ingestion, orchestration, transformation, testing, and analytics delivery.
-
-## Repository hygiene notes
-
-The following should **not** be committed:
-
-- `.env`
-- `banking_dbt/.dbt/profiles.yml`
-- virtual environments
-- dbt `target/` and `logs/`
-- Airflow runtime logs
-- local cache files
-- temporary backup files
-
-## Future enhancements
-
-- Add data quality alerts from Airflow or dbt test failures
-- Add observability dashboards for row counts and latency
-- Add schema evolution handling tests
-- Add a polished Power BI dashboard screenshot once the final report is complete
