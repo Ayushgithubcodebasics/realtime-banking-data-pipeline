@@ -206,6 +206,21 @@ cd ..
 ### Snowflake raw and analytics objects populated
 ![Snowflake database structure](docs/images/snowflake-database-structure.png)
 
+## Power BI Semantic Model
+
+The report is built on curated Snowflake serving views and a simple DirectQuery semantic model.
+
+It uses:
+- `PBI_FACT_TRANSACTIONS`
+- `PBI_DIM_DATE`
+- `PBI_DIM_ACCOUNTS_CURRENT`
+- `PBI_DIM_CUSTOMERS_CURRENT`
+- `PBI_PIPELINE_HEALTH`
+
+The goal was to keep reporting on top of modeled views instead of exposing raw pipeline tables.
+
+![Power BI Data Model](docs/images/powerbi-data-model-final.png)
+
 ## Engineering decisions and improvements
 
 This version improves the project in several important ways:
