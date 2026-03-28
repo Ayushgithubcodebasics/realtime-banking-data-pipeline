@@ -8,7 +8,12 @@ WITH base_transactions AS (
     SELECT *
     FROM {{ ref('stg_transactions') }}
     {% if is_incremental() %}
-    WHERE transaction_id NOT IN (SELECT transaction_id FROM {{ this }})
+    -- Watermark filter: only process records loaded after the latest record
+    -- already in the fact table. This replaces a NOT IN subquery which:
+    --   1. Performs a full table scan on every run (O(n) and growing)
+    --   2. Silently returns zero rows if any transaction_id is NULL
+    -- The unique_key config handles any late-arriving duplicates via MERGE.
+    WHERE loaded_at > (SELECT MAX(loaded_at) FROM {{ this }})
     {% endif %}
 ),
 account_versions AS (
